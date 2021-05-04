@@ -1,0 +1,76 @@
+PUT _watcher/watch/excessive_http_errors_monitor_a
+{
+  "metadata" : {
+    "name" : "New Excessive HTTP Errors Monitor",
+    "description" : "This is a HTTP request size watcher.",
+    "threshold" : 400
+  },  
+  "trigger": {
+    "schedule": {
+      "interval": "5m"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "indices": [
+          "packetbeat-*"
+        ],
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "range" : {
+                    "http.response.status_code" : {
+                      "gte" : 400
+                    }
+                  }
+                },
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-1m"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggs": {
+            "by_src_ip": {
+              "terms": {
+                "field": "source.ip"
+              },
+              "aggs": {
+                "count_target_ip": {
+                  "value_count": {
+                    "field": "destination.ip"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "source": "for (int i = 0; i < ctx.payload.aggregations.by_src_ip.buckets.size(); i++) {if (ctx.payload.aggregations.by_src_ip.buckets[i].count_target_ip.value >= ctx.metadata.threshold) return true;}return false;"
+    }
+  },
+      "transform": {
+        "script": {
+          "source": "def target='';def attacker='';def transform_body='excessive_http_errors_body';def body='';for (int i = 0; i < ctx.payload.aggregations.by_src_ip.buckets.size(); i++) {if (ctx.payload.aggregations.by_src_ip.buckets[i].count_target_ip.value >= ctx.metadata.threshold) {attacker=ctx.payload.aggregations.by_src_ip.buckets[i].key;body='Detected excessive HTTP errors triggered by ['+attacker+'] on a single server. '+ctx.payload.aggregations.by_src_ip.buckets[i].count_target_ip.value+ ' errors detected.'; return [ transform_body : body ]}}"
+        }
+      },
+  "actions": {
+    "log"     : {
+      "logging" : {
+        "text" : "WARNING: {{ctx.payload.excessive_http_errors_body}}"
+      }
+    }
+  }
+}

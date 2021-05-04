@@ -1,0 +1,79 @@
+PUT _watcher/watch/port_scan_monitor_a
+{
+  "metadata" : {
+    "name" : "Port Scan Monitor",
+    "description" : "This is a port scan watcher.",
+    "threshold" : 60
+  },  
+  "trigger": {
+    "schedule": {
+      "interval": "30s"
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "indices": [
+          "packetbeat-*"
+        ],
+        "body": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "must": [
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-1m"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggs": {
+            "by_src_ip": {
+              "terms": {
+                "field": "source.ip"
+              },
+              "aggs": {
+                "by_target_ip": {
+                  "terms": {
+                    "field": "destination.ip",
+                    "order": {
+                      "unique_port_count": "desc"
+                    }
+                  },
+                  "aggs": {
+                    "unique_port_count": {
+                      "cardinality": {
+                        "field": "destination.port"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "script": {
+      "source": "for (int i = 0; i < ctx.payload.aggregations.by_src_ip.buckets.size(); i++) {for (int j = 0; j < ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets.size(); j++) {if (ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets[j].unique_port_count.value > ctx.metadata.threshold) return true;}}return false;"
+    }
+  },
+      "transform": {
+        "script": {
+          "source": "def target='';def attacker='';def transform_body='port_scan_body';def body='';for (int i = 0; i < ctx.payload.aggregations.by_src_ip.buckets.size(); i++) {for (int j = 0; j < ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets.size(); j++) {if (ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets[j].unique_port_count.value >= ctx.metadata.threshold) {target=ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets[j].key;attacker=ctx.payload.aggregations.by_src_ip.buckets[i].key;body='Detected portscan from ['+attacker+'] to ['+target+']. '+ctx.payload.aggregations.by_src_ip.buckets[i].by_target_ip.buckets[j].unique_port_count.value+ ' ports scanned.'; return [ transform_body : body ]}}}"
+        }
+      },
+  "actions": {
+    "log"     : {
+      "logging" : {
+        "text" : "WARNING: {{ctx.payload.port_scan_body}}"
+      }
+    }
+  }
+}
