@@ -543,6 +543,7 @@ The following files were removed after the penetration test was completed.
 - /tmp/1518.c
 - /tmp/1518.o
 - /tmp/1518.so
+- /var/www/html/flag3.png
 - /var/www/html/backdoor.php
 - /var/www/html/metRev.php
 - /var/www/html/linpeas.out
